@@ -46,6 +46,9 @@ type Model struct {
 	colLane   int // 0–4, index into laneOrder
 	colWindow int // index into lanes[laneOrder[colLane]]
 
+	// Cut/paste
+	cutWinID string
+
 	// Input mode (add / rename)
 	inputMode   bool
 	inputPrompt string
@@ -58,6 +61,7 @@ type Model struct {
 	// Command file for deferred add-window (when running as a popup)
 	commandFile   string
 	returnCommand string
+	switchCommand string
 
 	// Window to restore on cancel
 	initialWinID string
@@ -66,7 +70,7 @@ type Model struct {
 	height int
 }
 
-func newModel(initialSessID, initialWinID, commandFile, returnCommand string) (Model, error) {
+func newModel(initialSessID, initialWinID, commandFile, returnCommand, switchCommand string) (Model, error) {
 	sess, err := loadSession(initialSessID)
 	if err != nil {
 		return Model{}, err
@@ -82,6 +86,7 @@ func newModel(initialSessID, initialWinID, commandFile, returnCommand string) (M
 		lanes:         groupByLane(windows),
 		commandFile:   commandFile,
 		returnCommand: returnCommand,
+		switchCommand: switchCommand,
 		initialWinID:  initialWinID,
 		width:         80,
 		height:        24,
@@ -160,6 +165,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		tmuxRun("switch-client", "-t", m.session.ID+":"+m.initialWinID)
 		return m, tea.Quit
 
+	case "alt+o":
+		if m.switchCommand != "" && m.commandFile != "" {
+			os.WriteFile(m.commandFile, []byte(m.switchCommand+"\n"), 0644)
+		}
+		return m, tea.Quit
+
 	case "a":
 		m.inputMode = true
 		m.inputPrompt = "Name"
@@ -182,6 +193,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.modalAction = ActionDelete
 		}
 		return m, nil
+
+	case "c", "x":
+		if w := m.currentWindow(); w != nil {
+			m.cutWinID = w.ID
+		}
+		return m, nil
+
+	case "p":
+		return m.handlePaste(false)
+
+	case "P":
+		return m.handlePaste(true)
 
 	case "down":
 		windows := m.lanes[laneOrder[m.colLane]]
@@ -217,10 +240,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		shift := laneKeyShift[msg.String()]
 		if m.colLane == laneIdx {
 			windows := m.lanes[laneOrder[laneIdx]]
-			if !shift && m.colWindow < len(windows)-1 {
-				m.colWindow++
-			} else if shift && m.colWindow > 0 {
-				m.colWindow--
+			if n := len(windows); n > 0 {
+				if !shift {
+					m.colWindow = (m.colWindow + 1) % n
+				} else {
+					m.colWindow = (m.colWindow - 1 + n) % n
+				}
 			}
 		} else {
 			m.colLane = laneIdx
@@ -348,6 +373,36 @@ func (m Model) handleDelete() (Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) handlePaste(before bool) (Model, tea.Cmd) {
+	if m.cutWinID == "" {
+		return m, nil
+	}
+	target := m.currentWindow()
+	laneKey := m.currentLane()
+
+	// Change the cut window's lane.
+	tmuxRun("set-window-option", "-t", m.cutWinID, "@lane", laneKey)
+
+	if target != nil && target.ID != m.cutWinID {
+		if before {
+			// Two-step swap: insert cut after target, then insert target after cut.
+			// Step 1: [..., target, cut, ...]
+			tmuxRun("move-window", "-a", "-s", m.cutWinID, "-t", target.ID)
+			// Step 2: [..., cut, target, ...]
+			tmuxRun("move-window", "-a", "-s", target.ID, "-t", m.cutWinID)
+		} else {
+			// Move immediately after target.
+			tmuxRun("move-window", "-a", "-s", m.cutWinID, "-t", target.ID)
+		}
+	}
+
+	pastedID := m.cutWinID
+	m.cutWinID = ""
+	m.refresh()
+	m.positionOnWindow(pastedID)
+	return m, nil
+}
+
 func (m Model) findNextWindow(deletedID, preferLane string) string {
 	for _, w := range m.lanes[preferLane] {
 		if w.ID != deletedID {
@@ -393,6 +448,18 @@ func (m *Model) refresh() {
 	m.windows = windows
 	m.lanes = groupByLane(windows)
 	m.clampColWindow()
+	if m.cutWinID != "" {
+		found := false
+		for _, w := range windows {
+			if w.ID == m.cutWinID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			m.cutWinID = ""
+		}
+	}
 }
 
 // ── View ─────────────────────────────────────────────────────────────────────
@@ -409,10 +476,15 @@ func (m Model) View() string {
 			dimStyle.Render(m.inputPrompt+": ") + string(m.inputValue) + cursorStyle.Render("█"))
 	} else {
 		bar = lipgloss.NewStyle().Width(m.width).Align(lipgloss.Center).Render(
-			hintStyle.Render("[a]dd   [r]ename   [d]elete"))
+			hintStyle.Render("[a]dd   [r]ename   [d]elete   [c]ut   [p]aste"))
 	}
 
-	return m.viewColumn() + "\n\n" + bar
+	content := m.viewColumn()
+	padding := m.height - (strings.Count(content, "\n") + 1)
+	if padding < 1 {
+		padding = 1
+	}
+	return content + strings.Repeat("\n", padding) + bar
 }
 
 func (m Model) viewColumn() string {
@@ -469,7 +541,7 @@ func (m Model) viewColumn() string {
 		rows = append(rows, pad+sb.String())
 	}
 
-	return "\n\n\n" + strings.Join(rows, "\n")
+	return "\n" + strings.Join(rows, "\n")
 }
 
 func (m Model) renderWindowLines(laneIdx int, key string, colWidth int) []string {
@@ -489,6 +561,9 @@ func (m Model) renderWindowLines(laneIdx int, key string, colWidth int) []string
 		return []string{s.Render("(empty)")}
 	}
 
+	const cutLabel = " (cut)"
+	const cutLabelWidth = len(cutLabel)
+
 	var lines []string
 	for wi, w := range windows {
 		var s lipgloss.Style
@@ -497,7 +572,17 @@ func (m Model) renderWindowLines(laneIdx int, key string, colWidth int) []string
 		} else {
 			s = plain
 		}
-		lines = append(lines, s.Render(truncate(w.Name, colWidth)))
+		var cell string
+		if w.ID == m.cutWinID {
+			nameWidth := colWidth - cutLabelWidth
+			if nameWidth < 1 {
+				nameWidth = 1
+			}
+			cell = s.Render(truncate(w.Name, nameWidth) + dimStyle.Render(cutLabel))
+		} else {
+			cell = s.Render(truncate(w.Name, colWidth))
+		}
+		lines = append(lines, cell)
 	}
 	return lines
 }

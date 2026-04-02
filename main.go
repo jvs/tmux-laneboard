@@ -11,6 +11,7 @@ import (
 func main() {
 	commandFile := flag.String("command-file", "", "write add-window command here instead of running it")
 	returnCommand := flag.String("return-command", "", "append this command to the command file after add-window")
+	switchCommand := flag.String("switch-command", "", "write this command to the command file when switching to another tool")
 	flag.Parse()
 
 	initialSessID, initialWinID, err := getCurrentSessionAndWindow()
@@ -19,7 +20,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	m, err := newModel(initialSessID, initialWinID, *commandFile, *returnCommand)
+	m, err := newModel(initialSessID, initialWinID, *commandFile, *returnCommand, *switchCommand)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "laneboard: %v\n", err)
 		os.Exit(1)
