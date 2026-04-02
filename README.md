@@ -16,7 +16,7 @@ the [lane system](https://github.com/jvs/dotfiles/blob/master/TMUX.md) in
 │              server                                        │
 │              staging                                       │
 │                                                            │
-│              [a]dd   [r]ename   [d]elete                   │
+│        [a]dd   [r]ename   [d]elete   [c]ut   [p]aste       │
 ╰────────────────────────────────────────────────────────────╯
 ```
 
@@ -34,8 +34,9 @@ see every lane and every window without cycling through them one at a time.
 ## Usage
 
 Open via `alt+u` (configured in `tmux-commands.zsh`). Press `alt+u` again to
-close. Also available in the command palette (`alt+y`) as "Open Laneboard" and
-in the menu (`alt+n`) as "Open Laneboard".
+close. Press `alt+o` to switch directly to supertree. Also available in the
+command palette (`alt+y`) as "Open Laneboard" and in the menu (`alt+n`) as
+"Open Laneboard".
 
 ## Navigation
 
@@ -43,8 +44,8 @@ Moving between lanes mirrors the lane keybindings you already use:
 
 | Key | Action |
 |-----|--------|
-| `h` / `j` / `k` / `l` / `;` | Jump to that lane; or move **down** if already there |
-| `H` / `J` / `K` / `L` / `:` | Move **up** within the current lane (shift variant) |
+| `h` / `j` / `k` / `l` / `;` | Jump to that lane; or move **down** (wraps) if already there |
+| `H` / `J` / `K` / `L` / `:` | Move **up** (wraps) within the current lane (shift variant) |
 | `↑` / `↓` | Move up / down within the current lane |
 | `←` / `→` | Move left / right between lanes |
 
@@ -58,8 +59,12 @@ windows as you navigate.
 | `a` | Add a new window to the current lane |
 | `r` | Rename the selected window |
 | `d` | Kill the selected window (with confirmation) |
+| `x` or `c` | Mark the selected window for cut (shown with gray `(cut)` label) |
+| `p` | Paste cut window **after** the selected window |
+| `P` | Paste cut window **before** the selected window |
 | `Enter` | Select and exit |
 | `Esc` / `alt+u` | Cancel and return to the original window |
+| `alt+o` | Switch to supertree |
 
 ### Adding windows
 
@@ -72,6 +77,14 @@ file and executed after the popup closes, avoiding nested-popup issues.
 
 After a kill, focus moves to another window in the same lane if one exists,
 otherwise to any other window in the session.
+
+### Cut and paste
+
+`x` (or `c`) marks the selected window for cut — it stays visible with a gray
+`(cut)` label. Navigate to the destination lane and window, then press `p` to
+paste after or `P` to paste before. The cut window's `@lane` tag is updated and
+tmux's window order is adjusted so the position within the lane reflects the
+paste location. The pasted window becomes selected.
 
 ## Implementation
 
@@ -94,5 +107,5 @@ make
 ```
 
 Produces the `laneboard` binary in the repo directory. The shell handler in
-`tmux-commands.zsh` looks for it at `~/github/jvs/laneboard/laneboard` and
-falls back to `$BIN_DIR/../runtime/laneboard/laneboard` for installed copies.
+`tmux-commands.zsh` looks for it at `~/github/jvs/tmux-laneboard/laneboard` and
+falls back to `$BIN_DIR/../runtime/tmux-laneboard/laneboard` for installed copies.
